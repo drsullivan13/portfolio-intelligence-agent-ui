@@ -2,7 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { storage } from "./storage";
+import { initializeStorage, getStorage } from "./storage";
+import { waitForDatabase } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,8 +62,19 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Seed admin user on startup (using mock storage - no database connection)
-  await (storage as any).seedAdminUser();
+  // Wait for database to be ready (if configured)
+  const dbReady = await waitForDatabase();
+  
+  // Initialize storage based on database availability
+  const storage = initializeStorage(dbReady);
+  
+  // Seed admin user on startup
+  try {
+    await storage.seedAdminUser();
+  } catch (error) {
+    console.error("Failed to seed admin user:", error);
+    console.log("Continuing with mock storage fallback");
+  }
   
   await registerRoutes(httpServer, app);
 

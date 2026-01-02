@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { getStorage } from "./storage";
 import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME } from "./lib/dynamodb";
 import { ScanCommand, QueryCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 
@@ -201,7 +201,7 @@ export async function registerRoutes(
   // GET /api/users/current - Get current user (admin for now)
   app.get("/api/users/current", async (req, res) => {
     try {
-      const user = await storage.getUser("admin-001");
+      const user = await getStorage().getUser("admin-001");
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -227,7 +227,7 @@ export async function registerRoutes(
   // GET /api/users - Get all users
   app.get("/api/users", async (req, res) => {
     try {
-      const users = await storage.getAllUsers();
+      const users = await getStorage().getAllUsers();
       // Don't expose passwords
       const safeUsers = users.map(({ password, ...user }) => user);
       res.json({

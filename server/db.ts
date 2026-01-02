@@ -4,28 +4,36 @@ import * as schema from "@shared/schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. For production deployments, configure DATABASE_URL in the Deployments > Configuration tab."
-  );
-}
-
 const isProduction = process.env.NODE_ENV === "production";
+const hasDatabaseUrl = !!process.env.DATABASE_URL;
 
-if (isProduction) {
-  console.log("Connecting to production database...");
+export let pool: pg.Pool | null = null;
+export let db: ReturnType<typeof drizzle> | null = null;
+
+if (hasDatabaseUrl) {
+  if (isProduction) {
+    console.log("Connecting to production database...");
+  }
+  
+  pool = new Pool({ 
+    connectionString: process.env.DATABASE_URL,
+    max: 10,
+    idleTimeoutMillis: 20000,
+    connectionTimeoutMillis: 30000,
+  });
+  
+  db = drizzle(pool, { schema });
+} else {
+  console.log("DATABASE_URL not set - running without database connection");
+  console.log("For production: Add 'Replit Postgres' service in Deployments > Configuration");
 }
-
-export const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 20000,
-  connectionTimeoutMillis: 30000,
-});
-
-export const db = drizzle(pool, { schema });
 
 export async function waitForDatabase(maxRetries = 10, delayMs = 2000): Promise<boolean> {
+  if (!pool) {
+    console.log("No database configured - skipping database wait");
+    return false;
+  }
+  
   for (let i = 0; i < maxRetries; i++) {
     try {
       const client = await pool.connect();
