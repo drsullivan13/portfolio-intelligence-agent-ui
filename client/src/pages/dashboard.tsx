@@ -3,16 +3,27 @@ import { StatsCard } from "@/components/stats-card";
 import { EventCard } from "@/components/event-card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, FileText, Newspaper, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Calendar, FileText, Newspaper, RefreshCw, CheckCircle2, ArrowUpDown } from "lucide-react";
 import { useState } from "react";
 import { Event } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { fetchEvents, fetchPortfolioMetrics } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseEventTimestamp } from "@/lib/date-utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type SortOption = 'newest' | 'oldest' | 'ticker';
 
 export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ANALYZED' | 'PENDING'>('ALL');
   const [tickerFilter, setTickerFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
   
   // Fetch events
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useQuery({
@@ -28,11 +39,26 @@ export default function Dashboard() {
     refetchInterval: 60000,
   });
   
+  // Filter events
   const filteredEvents = events.filter((event: Event) => {
     if (statusFilter === 'ANALYZED' && event.status !== 'ANALYZED') return false;
     if (statusFilter === 'PENDING' && event.status !== 'PENDING_ANALYSIS') return false;
     if (tickerFilter && event.ticker !== tickerFilter) return false;
     return true;
+  });
+
+  // Sort events
+  const sortedEvents = [...filteredEvents].sort((a, b) => {
+    switch (sortBy) {
+      case 'newest':
+        return parseEventTimestamp(b.timestamp).getTime() - parseEventTimestamp(a.timestamp).getTime();
+      case 'oldest':
+        return parseEventTimestamp(a.timestamp).getTime() - parseEventTimestamp(b.timestamp).getTime();
+      case 'ticker':
+        return a.ticker.localeCompare(b.ticker);
+      default:
+        return 0;
+    }
   });
 
   const uniqueTickers = Array.from(new Set(events.map(e => e.ticker)));
@@ -131,7 +157,22 @@ export default function Dashboard() {
 
       {/* Event Feed */}
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
-        <h2 className="text-xl font-semibold tracking-tight font-serif">Recent Activity</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold tracking-tight font-serif">Recent Activity</h2>
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Most Recent</SelectItem>
+                <SelectItem value="oldest">Oldest First</SelectItem>
+                <SelectItem value="ticker">By Ticker</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
         <div className="grid gap-4">
           {eventsLoading ? (
             <>
@@ -139,8 +180,8 @@ export default function Dashboard() {
               <Skeleton className="h-48" />
               <Skeleton className="h-48" />
             </>
-          ) : filteredEvents.length > 0 ? (
-            filteredEvents.map(event => (
+          ) : sortedEvents.length > 0 ? (
+            sortedEvents.map(event => (
               <EventCard key={event.event_id} event={event} />
             ))
           ) : (
