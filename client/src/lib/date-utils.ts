@@ -16,7 +16,9 @@ export function parseEventTimestamp(timestamp: string): Date {
   }
   
   // Handle standard ISO format or other formats
-  const parsed = new Date(timestamp);
+  // Fix malformed timestamps with "GMT-05:00" instead of "-05:00"
+  const cleanedTimestamp = timestamp.replace(/GMT([+-]\d{2}:\d{2})/, '$1');
+  const parsed = new Date(cleanedTimestamp);
   if (!isNaN(parsed.getTime())) {
     return parsed;
   }
