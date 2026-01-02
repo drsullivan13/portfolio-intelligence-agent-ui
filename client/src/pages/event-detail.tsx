@@ -1,17 +1,37 @@
 import { Layout } from "@/components/layout";
 import { useRoute } from "wouter";
-import { mockEvents } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, ExternalLink, Share2, Printer, AlertTriangle, Info, TrendingUp, TrendingDown, Minus, Clock, Search } from "lucide-react";
+import { ArrowLeft, ExternalLink, Share2, Printer, Info, TrendingUp, TrendingDown, Minus, Clock, Search } from "lucide-react";
 import { Link } from "wouter";
-import { formatDistanceToNow, format } from "date-fns";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { fetchEvent } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function EventDetail() {
   const [match, params] = useRoute("/event/:id");
-  const event = mockEvents.find(e => e.event_id === params?.id);
+  const eventId = params?.id || "";
+  
+  const { data: event, isLoading } = useQuery({
+    queryKey: ['event', eventId],
+    queryFn: () => fetchEvent(eventId),
+    enabled: !!eventId,
+  });
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="space-y-6">
+          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-64" />
+          <Skeleton className="h-96" />
+        </div>
+      </Layout>
+    );
+  }
 
   if (!event) {
     return (
@@ -212,7 +232,7 @@ export default function EventDetail() {
                       {sentimentScore > 0.2 ? "Bullish" : sentimentScore < -0.2 ? "Bearish" : "Neutral"}
                     </div>
                     <div className="text-xs text-muted-foreground font-mono mt-1">
-                      Score: {sentimentScore} • Confidence: High
+                      Score: {sentimentScore.toFixed(2)} • Confidence: High
                     </div>
                   </div>
                 </div>
@@ -269,10 +289,12 @@ export default function EventDetail() {
               <span>Detected:</span>
               <span className="text-foreground">{format(new Date(event.detected_at), "HH:mm:ss")}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Model:</span>
-              <span className="text-foreground">{event.processing_metadata?.model_version}</span>
-            </div>
+            {event.processing_metadata?.model_version && (
+              <div className="flex justify-between">
+                <span>Model:</span>
+                <span className="text-foreground">{event.processing_metadata.model_version}</span>
+              </div>
+            )}
           </div>
 
         </div>

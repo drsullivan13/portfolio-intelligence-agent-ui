@@ -1,27 +1,41 @@
 import { Layout } from "@/components/layout";
-import { mockEvents, mockPortfolioMetrics } from "@/lib/mock-data";
 import { StatsCard } from "@/components/stats-card";
 import { EventCard } from "@/components/event-card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, FileText, Newspaper, RefreshCw, Search, CheckCircle2 } from "lucide-react";
+import { Calendar, FileText, Newspaper, RefreshCw, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 import { Event } from "@/lib/types";
-import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { fetchEvents, fetchPortfolioMetrics } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ANALYZED' | 'PENDING'>('ALL');
   const [tickerFilter, setTickerFilter] = useState<string | null>(null);
   
-  const filteredEvents = mockEvents.filter((event: Event) => {
+  // Fetch events
+  const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useQuery({
+    queryKey: ['events'],
+    queryFn: () => fetchEvents(),
+    refetchInterval: 60000, // Auto-refresh every 60 seconds
+  });
+
+  // Fetch portfolio metrics
+  const { data: metrics, isLoading: metricsLoading } = useQuery({
+    queryKey: ['portfolio-metrics'],
+    queryFn: fetchPortfolioMetrics,
+    refetchInterval: 60000,
+  });
+  
+  const filteredEvents = events.filter((event: Event) => {
     if (statusFilter === 'ANALYZED' && event.status !== 'ANALYZED') return false;
     if (statusFilter === 'PENDING' && event.status !== 'PENDING_ANALYSIS') return false;
     if (tickerFilter && event.ticker !== tickerFilter) return false;
     return true;
   });
 
-  const uniqueTickers = Array.from(new Set(mockEvents.map(e => e.ticker)));
+  const uniqueTickers = Array.from(new Set(events.map(e => e.ticker)));
 
   return (
     <Layout>
@@ -33,7 +47,7 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground hidden md:inline-block">Last updated: Just now</span>
-          <Button variant="outline" size="sm" className="gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => refetchEvents()}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
@@ -42,31 +56,42 @@ export default function Dashboard() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
-        <StatsCard 
-          title="Total Events" 
-          value={mockPortfolioMetrics.total_events} 
-          icon={Calendar} 
-          trend="+12% from yesterday"
-          trendUp={true}
-        />
-        <StatsCard 
-          title="Analyzed" 
-          value={mockPortfolioMetrics.events_by_status.ANALYZED} 
-          icon={CheckCircle2} 
-          iconColor="text-success"
-        />
-        <StatsCard 
-          title="News Articles" 
-          value={mockPortfolioMetrics.events_by_type.NEWS} 
-          icon={Newspaper} 
-          iconColor="text-blue-400"
-        />
-        <StatsCard 
-          title="SEC Filings" 
-          value={mockPortfolioMetrics.events_by_type.SEC_FILING} 
-          icon={FileText} 
-          iconColor="text-amber-400"
-        />
+        {metricsLoading ? (
+          <>
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+          </>
+        ) : metrics ? (
+          <>
+            <StatsCard 
+              title="Total Events" 
+              value={metrics.total_events} 
+              icon={Calendar} 
+              trend="+12% from yesterday"
+              trendUp={true}
+            />
+            <StatsCard 
+              title="Analyzed" 
+              value={metrics.events_by_status.ANALYZED} 
+              icon={CheckCircle2} 
+              iconColor="text-success"
+            />
+            <StatsCard 
+              title="News Articles" 
+              value={metrics.events_by_type.NEWS} 
+              icon={Newspaper} 
+              iconColor="text-blue-400"
+            />
+            <StatsCard 
+              title="SEC Filings" 
+              value={metrics.events_by_type.SEC_FILING} 
+              icon={FileText} 
+              iconColor="text-amber-400"
+            />
+          </>
+        ) : null}
       </div>
 
       {/* Filters */}
@@ -108,7 +133,13 @@ export default function Dashboard() {
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
         <h2 className="text-xl font-semibold tracking-tight font-serif">Recent Activity</h2>
         <div className="grid gap-4">
-          {filteredEvents.length > 0 ? (
+          {eventsLoading ? (
+            <>
+              <Skeleton className="h-48" />
+              <Skeleton className="h-48" />
+              <Skeleton className="h-48" />
+            </>
+          ) : filteredEvents.length > 0 ? (
             filteredEvents.map(event => (
               <EventCard key={event.event_id} event={event} />
             ))
