@@ -3,7 +3,6 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
-import { waitForDatabase } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,14 +61,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Wait for database to be ready (important for production deployments)
-  const dbReady = await waitForDatabase();
-  if (!dbReady) {
-    console.error("Could not establish database connection. Exiting.");
-    process.exit(1);
-  }
-  
-  // Seed admin user on startup
+  // Seed admin user on startup (using mock storage - no database connection)
   await (storage as any).seedAdminUser();
   
   await registerRoutes(httpServer, app);

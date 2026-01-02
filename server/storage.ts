@@ -1,6 +1,4 @@
-import { type User, type InsertUser, users } from "@shared/schema";
-import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { type User, type InsertUser } from "@shared/schema";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -9,37 +7,32 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
 }
 
-export class DatabaseStorage implements IStorage {
+export class MockStorage implements IStorage {
+  private users: Map<string, User> = new Map([
+    ["admin-001", { id: "admin-001", username: "admin", password: "admin123" }]
+  ]);
+
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    return this.users.get(id);
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
+    return Array.from(this.users.values()).find(u => u.username === username);
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+    const user: User = { id: `user-${Date.now()}`, username: insertUser.username, password: insertUser.password };
+    this.users.set(user.id, user);
     return user;
   }
 
   async getAllUsers(): Promise<User[]> {
-    return db.select().from(users);
+    return Array.from(this.users.values());
   }
 
   async seedAdminUser(): Promise<void> {
-    const existingAdmin = await this.getUserByUsername("admin");
-    if (!existingAdmin) {
-      await db.insert(users).values({
-        id: "admin-001",
-        username: "admin",
-        password: "admin123",
-      }).onConflictDoNothing();
-      console.log("Admin user seeded successfully");
-    }
+    console.log("Using mock storage - no database connection");
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new MockStorage();
