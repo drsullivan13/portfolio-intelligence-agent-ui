@@ -2,7 +2,7 @@ import { Event } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDistanceToNow } from "date-fns";
+import { format } from "date-fns";
 import { 
   Newspaper, 
   FileText, 
@@ -63,7 +63,7 @@ export function EventCard({ event }: EventCardProps) {
                 <span className="font-bold text-foreground tracking-wide">{event.ticker}</span>
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground flex items-center gap-1">
-                  {formatDistanceToNow(eventDate, { addSuffix: true })}
+                  {format(eventDate, "MMM d, yyyy • h:mm a")}
                 </span>
                 
                 {event.status === 'ANALYZED' && isNews && (
