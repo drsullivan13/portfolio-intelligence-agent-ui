@@ -1,5 +1,5 @@
 import { Event } from "@/lib/types";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
@@ -10,12 +10,12 @@ import {
   TrendingDown, 
   Minus, 
   CheckCircle2, 
-  Clock, 
-  AlertTriangle,
+  Clock,
   ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
+import { parseEventTimestamp } from "@/lib/date-utils";
 
 interface EventCardProps {
   event: Event;
@@ -28,17 +28,14 @@ export function EventCard({ event }: EventCardProps) {
   // Determine card border/bg based on sentiment/status
   let sentimentColor = "border-border";
   let sentimentBg = "bg-card";
-  let iconColor = "text-muted-foreground";
   
   if (isNews && event.status === 'ANALYZED') {
     if (sentimentScore > 0.2) {
       sentimentColor = "border-success/30 hover:border-success/50";
       sentimentBg = "bg-success/5";
-      iconColor = "text-success";
     } else if (sentimentScore < -0.2) {
       sentimentColor = "border-destructive/30 hover:border-destructive/50";
       sentimentBg = "bg-destructive/5";
-      iconColor = "text-destructive";
     }
   }
 
@@ -48,6 +45,8 @@ export function EventCard({ event }: EventCardProps) {
     if (event.sentiment_score < -0.2) return <TrendingDown className="h-4 w-4 text-destructive" />;
     return <Minus className="h-4 w-4 text-warning" />;
   };
+
+  const eventDate = parseEventTimestamp(event.timestamp);
 
   return (
     <Link href={`/event/${event.event_id}`}>
@@ -64,7 +63,7 @@ export function EventCard({ event }: EventCardProps) {
                 <span className="font-bold text-foreground tracking-wide">{event.ticker}</span>
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground flex items-center gap-1">
-                  {formatDistanceToNow(new Date(event.timestamp), { addSuffix: true })}
+                  {formatDistanceToNow(eventDate, { addSuffix: true })}
                 </span>
                 
                 {event.status === 'ANALYZED' && isNews && (
@@ -90,9 +89,9 @@ export function EventCard({ event }: EventCardProps) {
               </h3>
 
               {/* Summary Preview */}
-              {event.summary && (
+              {event.analysis?.summary && (
                 <p className="text-sm text-muted-foreground line-clamp-2">
-                  {event.summary}
+                  {event.analysis.summary}
                 </p>
               )}
 

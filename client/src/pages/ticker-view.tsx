@@ -8,6 +8,7 @@ import { ArrowLeft, Download, Filter, TrendingUp, ChevronDown } from "lucide-rea
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useState } from "react";
+import { parseEventTimestamp } from "@/lib/date-utils";
 import {
   Select,
   SelectContent,
@@ -198,7 +199,7 @@ export default function TickerView() {
                   
                   {/* Date Header if it changes (simplified for now) */}
                   <div className="mb-2 text-xs font-mono text-muted-foreground">
-                    {format(new Date(event.timestamp), "MMM d, h:mm a")}
+                    {format(parseEventTimestamp(event.timestamp), "MMM d, h:mm a")}
                   </div>
 
                   <EventCard event={event} />

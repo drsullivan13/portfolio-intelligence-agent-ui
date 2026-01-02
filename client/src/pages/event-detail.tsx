@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { fetchEvent } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseEventTimestamp } from "@/lib/date-utils";
 
 export default function EventDetail() {
   const [match, params] = useRoute("/event/:id");
@@ -95,7 +96,7 @@ export default function EventDetail() {
                 {isNews ? "News" : "SEC Filing"}
               </Badge>
               <span className="text-muted-foreground text-sm font-mono">
-                {format(new Date(event.timestamp), "MMM d, yyyy • h:mm a")}
+                {format(parseEventTimestamp(event.timestamp), "MMM d, yyyy • h:mm a")}
               </span>
             </div>
 
@@ -287,7 +288,7 @@ export default function EventDetail() {
             </div>
             <div className="flex justify-between">
               <span>Detected:</span>
-              <span className="text-foreground">{format(new Date(event.detected_at), "HH:mm:ss")}</span>
+              <span className="text-foreground">{format(parseEventTimestamp(event.detected_at), "HH:mm:ss")}</span>
             </div>
             {event.processing_metadata?.model_version && (
               <div className="flex justify-between">
