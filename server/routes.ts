@@ -138,6 +138,51 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/users/current - Get current user (admin for now)
+  app.get("/api/users/current", async (req, res) => {
+    try {
+      const user = await storage.getUser("admin-001");
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: "No user found"
+        });
+      }
+      
+      // Don't expose password
+      const { password, ...safeUser } = user;
+      res.json({
+        success: true,
+        user: safeUser
+      });
+    } catch (error) {
+      console.error("Error fetching current user:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch user"
+      });
+    }
+  });
+
+  // GET /api/users - Get all users
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      // Don't expose passwords
+      const safeUsers = users.map(({ password, ...user }) => user);
+      res.json({
+        success: true,
+        users: safeUsers
+      });
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch users"
+      });
+    }
+  });
+
   // GET /api/health - Health check
   app.get("/api/health", async (req, res) => {
     try {
