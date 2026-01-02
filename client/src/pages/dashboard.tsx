@@ -3,13 +3,14 @@ import { StatsCard } from "@/components/stats-card";
 import { EventCard } from "@/components/event-card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, FileText, Newspaper, RefreshCw, CheckCircle2, ArrowUpDown } from "lucide-react";
+import { Calendar, FileText, Newspaper, RefreshCw, CheckCircle2, ArrowUpDown, X, Filter } from "lucide-react";
 import { useState } from "react";
 import { Event } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { fetchEvents, fetchPortfolioMetrics } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseEventTimestamp } from "@/lib/date-utils";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type SortOption = 'newest' | 'oldest' | 'ticker';
 
@@ -123,35 +132,79 @@ export default function Dashboard() {
 
       {/* Filters */}
       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200">
-        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-          <Tabs defaultValue="ALL" className="w-full md:w-auto" onValueChange={(v) => setStatusFilter(v as any)}>
-            <TabsList>
-              <TabsTrigger value="ALL">All Events</TabsTrigger>
-              <TabsTrigger value="ANALYZED">Analyzed</TabsTrigger>
-              <TabsTrigger value="PENDING">Pending</TabsTrigger>
-            </TabsList>
-          </Tabs>
+        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <Tabs defaultValue="ALL" className="w-full sm:w-auto" onValueChange={(v) => setStatusFilter(v as any)}>
+              <TabsList>
+                <TabsTrigger value="ALL" data-testid="filter-all">All Events</TabsTrigger>
+                <TabsTrigger value="ANALYZED" data-testid="filter-analyzed">Analyzed</TabsTrigger>
+                <TabsTrigger value="PENDING" data-testid="filter-pending">Pending</TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto mask-linear-fade">
-             <Button 
-               variant={tickerFilter === null ? "secondary" : "ghost"} 
-               size="sm"
-               onClick={() => setTickerFilter(null)}
-               className="rounded-full px-4"
-             >
-               All Tickers
-             </Button>
-             {uniqueTickers.map(ticker => (
-               <Button
-                 key={ticker}
-                 variant={tickerFilter === ticker ? "secondary" : "outline"}
-                 size="sm"
-                 onClick={() => setTickerFilter(ticker === tickerFilter ? null : ticker)}
-                 className="rounded-full px-4"
-               >
-                 {ticker}
-               </Button>
-             ))}
+            {/* Ticker Filter Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2" data-testid="ticker-filter-dropdown">
+                  <Filter className="h-4 w-4" />
+                  {tickerFilter ? tickerFilter : "All Tickers"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuLabel>Filter by Ticker</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={tickerFilter === null}
+                  onCheckedChange={() => setTickerFilter(null)}
+                  data-testid="ticker-filter-all"
+                >
+                  All Tickers
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+                {uniqueTickers.map(ticker => (
+                  <DropdownMenuCheckboxItem
+                    key={ticker}
+                    checked={tickerFilter === ticker}
+                    onCheckedChange={() => setTickerFilter(ticker === tickerFilter ? null : ticker)}
+                    data-testid={`ticker-filter-${ticker}`}
+                  >
+                    {ticker}
+                    <Badge variant="secondary" className="ml-auto text-xs">
+                      {events.filter(e => e.ticker === ticker).length}
+                    </Badge>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Active Filter Badge */}
+            {tickerFilter && (
+              <Badge 
+                variant="secondary" 
+                className="gap-1 cursor-pointer hover:bg-destructive/20 transition-colors"
+                onClick={() => setTickerFilter(null)}
+                data-testid="clear-ticker-filter"
+              >
+                {tickerFilter}
+                <X className="h-3 w-3" />
+              </Badge>
+            )}
+          </div>
+
+          {/* Quick Ticker Chips - Desktop Only */}
+          <div className="hidden xl:flex items-center gap-2 flex-wrap">
+            {uniqueTickers.slice(0, 5).map(ticker => (
+              <Button
+                key={ticker}
+                variant={tickerFilter === ticker ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setTickerFilter(ticker === tickerFilter ? null : ticker)}
+                className="rounded-full px-3 h-7 text-xs"
+                data-testid={`quick-ticker-${ticker}`}
+              >
+                {ticker}
+              </Button>
+            ))}
           </div>
         </div>
       </div>

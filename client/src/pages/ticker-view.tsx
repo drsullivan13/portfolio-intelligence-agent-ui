@@ -42,11 +42,17 @@ export default function TickerView() {
     queryFn: () => fetchEvents({ ticker: symbol }),
   });
   
-  // Apply secondary filters
-  const filteredEvents = allEvents.filter(e => {
-    if (eventTypeFilter !== "ALL" && e.event_type !== eventTypeFilter) return false;
-    return true;
-  });
+  // Apply secondary filters and sort by most recent first
+  const filteredEvents = allEvents
+    .filter(e => {
+      if (eventTypeFilter !== "ALL" && e.event_type !== eventTypeFilter) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = parseEventTimestamp(a.timestamp).getTime();
+      const dateB = parseEventTimestamp(b.timestamp).getTime();
+      return dateB - dateA; // Most recent first
+    });
 
   // Calculate some ticker specific stats
   const newsCount = allEvents.filter(e => e.event_type === 'NEWS').length;
