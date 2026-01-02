@@ -1,0 +1,595 @@
+# Portfolio Intelligence Agent — Frontend Design Brief
+
+## Project Overview
+
+Build a **real-time portfolio monitoring dashboard** for investment professionals. The system autonomously detects market-moving events (SEC 8-K filings, news sentiment) and provides AI-powered analysis. This is a demonstration project for a senior software engineering role at T. Rowe Price, showcasing autonomous AI event monitoring with RAG-based analysis.
+
+Think Bloomberg Terminal meets modern fintech — professional, data-dense, but beautifully readable.
+
+---
+
+## Design Direction
+
+**Aesthetic**: Financial terminal / dark mode editorial — sophisticated, information-dense, zero fluff. Inspired by Bloomberg, Refinitiv, and modern trading platforms but with cleaner typography and better hierarchy.
+
+**Key Principles**:
+- **Data density with clarity** — lots of information, zero confusion
+- **Dark theme primary** — reduce eye strain for all-day monitoring (with optional light mode toggle)
+- **Real-time feel** — subtle pulses, live timestamps, activity indicators
+- **Professional credibility** — this is for hedge fund analysts, not retail investors
+
+---
+
+## Technology Stack
+
+- **Framework**: Next.js (App Router, TypeScript)
+- **Styling**: Tailwind CSS
+- **Data Fetching**: React Query (@tanstack/react-query)
+- **Icons**: lucide-react
+- **Date Formatting**: date-fns
+- **Charts**: recharts (for portfolio metrics)
+
+---
+
+## Data Structures
+
+### Event Object (from DynamoDB)
+```typescript
+interface Event {
+  event_id: string;                    // Unique identifier (SHA256 hash or accession number)
+  ticker: string;                      // Stock ticker (e.g., "TSLA", "NVDA")
+  event_type: 'NEWS' | 'SEC_FILING';   // Type of event
+  timestamp: string;                   // ISO 8601 datetime
+  headline: string;                    // Event headline
+  url: string;                         // Source URL
+  sentiment_score?: number;            // Range: -1 to 1 (NEWS events only)
+  status: 'PENDING_ANALYSIS' | 'ANALYZED' | 'FAILED';
+  summary?: string;                    // Brief summary
+  
+  // SEC Filing specific fields
+  items_reported?: string;             // e.g., "2.02, 9.01"
+  primary_item?: string;               // e.g., "2.02"
+  content_summary?: string;
+  
+  // Analysis fields (present when status = 'ANALYZED')
+  analysis?: EventAnalysis;
+  detected_at: string;                 // When event was detected
+  analyzed_at?: string;                // When analysis completed
+  processing_metadata?: {
+    similar_events_count: number;
+    model_version: string;
+  };
+}
+
+interface EventAnalysis {
+  summary: string;                     // 2-3 sentence executive summary
+  key_insights: string[];              // Array of 3-5 key insights
+  impact_assessment: {
+    market_implications: string;
+    financial_impact: string;
+    strategic_significance: string;
+  };
+  related_context: string;             // How this connects to recent events
+  investigation_areas: string[];       // Areas for further research
+  confidence_level: 'HIGH' | 'MEDIUM' | 'LOW';
+}
+```
+
+### Portfolio Metrics Object
+```typescript
+interface PortfolioMetrics {
+  total_events: number;
+  events_by_type: {
+    NEWS: number;
+    SEC_FILING: number;
+  };
+  events_by_status: {
+    PENDING_ANALYSIS: number;
+    ANALYZED: number;
+    FAILED: number;
+  };
+  sentiment_distribution: {
+    positive: number;   // sentiment_score > 0.2
+    neutral: number;    // sentiment_score between -0.2 and 0.2
+    negative: number;   // sentiment_score < -0.2
+  };
+  top_tickers: Array<{
+    ticker: string;
+    count: number;
+  }>;
+  recent_activity: Array<{
+    date: string;       // YYYY-MM-DD format
+    count: number;
+  }>;
+}
+```
+
+### Similar Event (from Pinecone vector search)
+```typescript
+interface SimilarEvent {
+  score: number;              // 0.0 to 1.0 relevance
+  ticker: string;
+  event_type: string;
+  timestamp: string;
+  headline: string;
+  url: string;
+}
+```
+
+---
+
+## API Routes to Build
+
+Create Next.js API routes that query DynamoDB directly using the AWS SDK.
+
+### 1. GET /api/events
+**File**: `app/api/events/route.ts`
+
+Query DynamoDB table `portfolio-events` with optional filtering.
+
+**Query Parameters**:
+- `ticker` (optional): Filter by ticker symbol
+- `limit` (optional): Max results (default: 50)
+- `status` (optional): Filter by status
+
+**Implementation Notes**:
+- If `ticker` provided: Use `QueryCommand` with GSI `ticker-timestamp-index`
+- If no ticker: Use `ScanCommand` (acceptable for demo with <1000 records)
+- Sort by `timestamp` descending (newest first)
+- Use `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb`
+
+**Response**:
+```json
+{
+  "success": true,
+  "count": 25,
+  "events": [Event, Event, ...]
+}
+```
+
+### 2. GET /api/events/[id]
+**File**: `app/api/events/[id]/route.ts`
+
+Fetch single event by `event_id` (primary key).
+
+**Implementation Notes**:
+- Use `GetCommand` with key `{ event_id: id }`
+- Return 404 if event not found
+
+**Response**:
+```json
+{
+  "success": true,
+  "event": Event
+}
+```
+
+### 3. GET /api/portfolio
+**File**: `app/api/portfolio/route.ts`
+
+Calculate aggregate metrics from all events.
+
+**Implementation Notes**:
+- Use `ScanCommand` to fetch all events
+- Calculate metrics in-memory:
+  - Count total events
+  - Group by `event_type` (NEWS vs SEC_FILING)
+  - Group by `status`
+  - Group sentiment: positive (>0.2), neutral (-0.2 to 0.2), negative (<-0.2)
+  - Count events per ticker, sort descending, take top 10
+  - Count events per day for last 7 days
+
+**Response**:
+```json
+{
+  "success": true,
+  "metrics": PortfolioMetrics
+}
+```
+
+### 4. GET /api/health
+System health check endpoint.
+
+---
+
+## DynamoDB Connection Setup
+
+Create a utility file `lib/dynamodb.ts`:
+
+```typescript
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+
+const client = new DynamoDBClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!
+  }
+});
+
+const docClient = DynamoDBDocumentClient.from(client);
+const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME;
+```
+
+**Key DynamoDB Info**:
+- Table name: `portfolio-events`
+- Primary key: `event_id` (String)
+- GSI: `ticker-timestamp-index` with partition key `ticker` and sort key `timestamp`
+- Use `ScanIndexForward: false` for descending order
+
+**Important**: Add `export const dynamic = 'force-dynamic';` to each API route to prevent caching.
+
+---
+
+## Environment Variables
+
+```bash
+# AWS Credentials (for API routes to query DynamoDB)
+AWS_REGION=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+
+# DynamoDB Table
+DYNAMODB_TABLE_NAME=portfolio-events
+
+# Optional
+NEXT_PUBLIC_DASHBOARD_URL=
+```
+
+---
+
+## Pages to Build
+
+### 1. Dashboard (Home) — Route: `/`
+
+The command center showing all portfolio activity.
+
+**Layout**:
+- Header with title "Portfolio Intelligence" and refresh button
+- Portfolio stats cards (4 metrics across top row)
+- Status filter buttons (All Events | Analyzed | Pending)
+- Ticker filter pills (horizontal scrollable)
+- Event feed (cards in vertical list)
+
+**Portfolio Stats Cards**:
+1. **Total Events** — count with calendar icon
+2. **Analyzed Events** — count with checkmark icon, green accent
+3. **News Articles** — count with newspaper icon, blue accent
+4. **SEC Filings** — count with document icon, orange accent
+
+**Filters**:
+- Status filter: 3-button toggle (All, Analyzed, Pending) — active state highlighted
+- Ticker filter: Pills for each unique ticker + "All Tickers" option, horizontally scrollable
+- Both filters work together (AND logic)
+
+**Data Updates**:
+- Auto-refresh every 60 seconds using React Query
+- Manual refresh button in header
+- Show "Last updated" timestamp
+
+---
+
+### 2. Event Detail Page — Route: `/event/[id]`
+
+Deep dive on a single event with full AI analysis.
+
+**Layout**:
+- Back button (← Back to dashboard)
+- Event header section
+- Analysis sections (if status = 'ANALYZED')
+- Pending state (if status = 'PENDING_ANALYSIS')
+
+**Event Header Section**:
+- Large ticker symbol + event type badge
+- Timestamp (full date/time + relative time like "2 hours ago")
+- Headline (large, bold, prominent)
+- Sentiment indicator (icon + label + numeric score)
+- External link to source
+
+**Analysis Sections (For Analyzed Events)**:
+
+1. **AI Analysis Summary** (prominent card)
+   - Summary text (larger font, easy to read)
+   - Confidence level badge (HIGH/MEDIUM/LOW)
+
+2. **Key Insights** (card with bulleted list)
+   - 3-5 specific insights with blue bullet points
+   - Each insight as actionable statement
+
+3. **Impact Assessment** (card with 3 subsections)
+   - Market Implications
+   - Financial Impact
+   - Strategic Significance
+   - Each with labeled header and content
+
+4. **Related Context** (light accent background card)
+   - Related context narrative
+   - Similar events count badge
+
+5. **Investigation Areas** (card with list)
+   - Document icons for each item
+   - 3-5 concrete next steps for analysts
+
+**Pending State**:
+- Yellow/amber card with hourglass or spinner
+- "Analysis Pending" message
+- "Check back shortly" supporting text
+
+---
+
+### 3. Ticker View — Route: `/ticker/[symbol]`
+
+All events for a specific stock.
+
+**Layout**:
+- Ticker header with company symbol prominently displayed
+- Event count and date range summary
+- Timeline view of all events (vertical, chronological)
+- Filters: Event type, date range, sentiment range
+- Export button (JSON download)
+
+---
+
+### 4. Settings / Configuration — Route: `/settings`
+
+System configuration display.
+
+- Watchlist display (TSLA, NVDA, AAPL, MSFT, GOOGL)
+- Notification status (Slack webhook configured/not configured)
+- System health indicators
+- Last detection run timestamp
+
+---
+
+## UI Component Specifications
+
+### Event Card Component
+**Props**: `{ event: Event }`
+
+**Design**:
+- Subtle border with hover elevation effect
+- Background color based on sentiment:
+  - Positive (>0.2): Light green tint
+  - Negative (<-0.2): Light red tint
+  - Neutral: Default card background
+- Left side: Event type icon
+- Top row: Ticker (bold) | Relative time | Sentiment icon
+- Headline (prominent)
+- If analyzed: Summary preview (2 lines max, truncated with ellipsis)
+- Bottom row: Status badge | Confidence badge | Related events count
+- Entire card clickable → navigates to `/event/[id]`
+
+### Sentiment Indicator
+```typescript
+function getSentimentDisplay(score?: number) {
+  if (!score) return { icon: 'Minus', color: 'gray', label: 'N/A' };
+  if (score > 0.2) return { icon: 'TrendingUp', color: 'green', label: 'Bullish' };
+  if (score < -0.2) return { icon: 'TrendingDown', color: 'red', label: 'Bearish' };
+  return { icon: 'Minus', color: 'amber', label: 'Neutral' };
+}
+```
+
+### Confidence Badge
+- **HIGH**: Solid green badge with checkmark
+- **MEDIUM**: Yellow/amber outline badge
+- **LOW**: Red outline badge with warning icon
+
+### Event Type Pills
+- **NEWS**: Blue pill with Newspaper icon
+- **SEC_FILING**: Orange/gold pill with FileText icon
+
+### 8-K Item Badges
+Map SEC filing item numbers to human-readable labels:
+```typescript
+const ITEM_LABELS: Record<string, string> = {
+  '1.01': 'Material Agreement',
+  '2.02': 'Financial Results',
+  '5.02': 'Officer/Director Changes',
+  '7.01': 'Regulation FD Disclosure',
+  '8.01': 'Other Material Events',
+  '9.01': 'Exhibits'
+};
+```
+
+### Timestamp Display
+- Show relative time ("2 hours ago") as primary
+- Full ISO timestamp on hover tooltip
+- Use user's local timezone
+- Highlight events < 1 hour old with subtle pulse animation
+
+---
+
+## Design Guidelines
+
+### Color Palette (Dark Theme)
+- **Background**: Dark slate (#0F172A or similar)
+- **Card Background**: Slightly lighter (#1E293B)
+- **Primary**: Blue (#3B82F6) — buttons, links, accents
+- **Success**: Green (#10B981) — positive sentiment, analyzed status
+- **Warning**: Amber (#F59E0B) — pending status, medium confidence
+- **Error**: Red (#EF4444) — negative sentiment, low confidence, failed
+- **Text Primary**: White/light gray (#F8FAFC)
+- **Text Secondary**: Muted gray (#94A3B8)
+
+### Typography
+- Use a clean, professional font (system font stack or Inter)
+- Headers: Bold, clear hierarchy
+- Body: Regular weight, good line height for readability
+- Monospace for event IDs, timestamps, technical data
+
+### Layout
+- Max width: 1280px centered
+- Consistent padding: 16px mobile, 24-32px desktop
+- Card spacing: 16px gaps
+- Border radius: 8px for cards, 6px for buttons/badges
+
+### Interactions
+- Hover states on all interactive elements
+- Smooth transitions (150-200ms)
+- Loading states with skeleton loaders or spinners
+- Empty states with helpful messages and icons
+
+### Responsive Design
+- Mobile-first approach
+- Stats grid: 1 column mobile, 2 tablet, 4 desktop
+- Event cards: Full width, vertical list on all sizes
+- Filters: Horizontal scroll on mobile
+
+---
+
+## Key Requirements
+
+### Performance
+- React Query for caching and auto-refresh (60 second stale time)
+- Optimistic UI where appropriate
+- Minimize re-renders
+
+### Error Handling
+- Graceful error states for API failures
+- Loading states for all async operations
+- Empty states when no data matches filters
+
+### Accessibility
+- Semantic HTML structure
+- ARIA labels for interactive elements
+- Keyboard navigation support
+- Sufficient color contrast
+
+### Code Quality
+- TypeScript strict mode
+- Clean component architecture
+- Reusable utility functions
+- Comments for complex logic
+
+---
+
+## Mock Data for Development
+
+Use this sample data while building before connecting to live DynamoDB:
+
+```typescript
+const mockEvents: Event[] = [
+  {
+    event_id: "a1b2c3d4e5f6g7h8",
+    ticker: "NVDA",
+    event_type: "NEWS",
+    timestamp: "2025-01-02T14:30:00-05:00",
+    headline: "NVIDIA Announces Next-Generation AI Chips at CES 2025",
+    url: "https://example.com/nvda-ces-2025",
+    sentiment_score: 0.85,
+    status: "ANALYZED",
+    summary: "NVIDIA unveiled its next-generation Blackwell Ultra architecture...",
+    analysis: {
+      summary: "NVIDIA unveiled its next-generation Blackwell Ultra architecture at CES 2025, promising 4x performance improvements for AI training workloads. This announcement reinforces NVIDIA's dominant position in the AI accelerator market.",
+      key_insights: [
+        "Blackwell Ultra delivers 4x performance improvement over previous generation",
+        "New architecture specifically optimized for trillion-parameter models",
+        "Major cloud providers announced day-one availability",
+        "Pricing positioned 20% higher than current generation"
+      ],
+      impact_assessment: {
+        market_implications: "Reinforces NVIDIA's AI leadership and creates higher barriers to entry for AMD/Intel competition",
+        financial_impact: "Higher ASPs could expand gross margins; strong hyperscaler demand signals robust Q1 datacenter revenue",
+        strategic_significance: "Demonstrates continued R&D execution and maintains 18-month lead over competitors"
+      },
+      related_context: "Follows similar product announcements and positions NVIDIA ahead of AMD's MI400 launch expected in Q2.",
+      investigation_areas: [
+        "Verify hyperscaler volume commitments and delivery timelines",
+        "Analyze competitive response from AMD MI400 roadmap",
+        "Review supply chain capacity for new node production"
+      ],
+      confidence_level: "HIGH"
+    },
+    detected_at: "2025-01-02T14:32:00-05:00",
+    analyzed_at: "2025-01-02T14:33:15-05:00",
+    processing_metadata: {
+      similar_events_count: 7,
+      model_version: "claude-sonnet-4-5-20250929"
+    }
+  },
+  {
+    event_id: "sec-0001193125-25-000123",
+    ticker: "TSLA",
+    event_type: "SEC_FILING",
+    timestamp: "2025-01-02T09:15:00-05:00",
+    headline: "8-K Filing: Item 5.02 - Officer/Director Changes",
+    url: "https://www.sec.gov/Archives/edgar/data/...",
+    status: "ANALYZED",
+    items_reported: "5.02, 9.01",
+    primary_item: "5.02",
+    analysis: {
+      summary: "Tesla filed an 8-K announcing the departure of the Chief Financial Officer, effective immediately. The company appointed an interim CFO from within the finance organization.",
+      key_insights: [
+        "CFO departure was unexpected based on recent earnings call tone",
+        "Interim appointment suggests permanent search underway",
+        "Filing language indicates standard transition, not termination for cause"
+      ],
+      impact_assessment: {
+        market_implications: "C-suite turnover typically creates short-term uncertainty; watch for analyst downgrades",
+        financial_impact: "No immediate financial impact, but may affect Q1 guidance credibility",
+        strategic_significance: "Leadership continuity important during Cybertruck ramp and margin pressure"
+      },
+      related_context: "Third executive departure in 6 months following VP of Engineering and Head of Autopilot.",
+      investigation_areas: [
+        "Research departing CFO's tenure and prior statements",
+        "Monitor for follow-on departures",
+        "Track analyst rating changes over next 48 hours"
+      ],
+      confidence_level: "MEDIUM"
+    },
+    detected_at: "2025-01-02T09:20:00-05:00",
+    analyzed_at: "2025-01-02T09:22:30-05:00",
+    processing_metadata: {
+      similar_events_count: 3,
+      model_version: "claude-sonnet-4-5-20250929"
+    }
+  },
+  {
+    event_id: "pending-news-001",
+    ticker: "AAPL",
+    event_type: "NEWS",
+    timestamp: "2025-01-02T16:45:00-05:00",
+    headline: "Apple Reportedly in Talks to Acquire AI Startup for $1B",
+    url: "https://example.com/apple-ai-acquisition",
+    sentiment_score: 0.42,
+    status: "PENDING_ANALYSIS",
+    summary: "Apple is reportedly in advanced negotiations to acquire an AI startup...",
+    detected_at: "2025-01-02T16:47:00-05:00"
+  }
+];
+```
+
+Create 8-10 varied events across all 5 watchlist tickers (TSLA, NVDA, AAPL, MSFT, GOOGL), mixing NEWS and SEC_FILING types, different sentiment scores, and all status types.
+
+---
+
+## Deliverables
+
+1. **Fully functional Next.js application** with TypeScript
+2. **All core pages** implemented (Dashboard, Event Detail, Ticker View, Settings)
+3. **Reusable component library** (EventCard, SentimentBadge, ConfidenceBadge, TickerFilter, StatusFilter, etc.)
+4. **Dark theme** as default with clean, professional aesthetic
+5. **Responsive layout** (mobile-friendly)
+6. **Loading, error, and empty states** for all data-dependent views
+7. **Working API routes** with DynamoDB integration
+
+---
+
+## Out of Scope (Initial Build)
+
+- Authentication / user management
+- Real-time WebSocket updates (polling is fine)
+- Watchlist CRUD operations (display only)
+- Email/push notifications
+- Historical analytics charts over extended time periods
+
+---
+
+## Final Notes
+
+- **The AI analysis is the star** — make those sections visually prominent and easy to scan
+- **Polish matters** — this is for a job application demo video
+- Keep it simple and functional over flashy
+- Test with both ANALYZED and PENDING_ANALYSIS states
+- Ensure the data flow is clear: Dashboard → Event Detail → Back to Dashboard
