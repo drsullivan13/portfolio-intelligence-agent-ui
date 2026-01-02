@@ -5,8 +5,84 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Bell, Activity, Database, Shield, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+
+interface Ticker {
+  symbol: string;
+  name: string;
+  status: "Active" | "Inactive";
+}
 
 export default function Settings() {
+  const { toast } = useToast();
+  const [tickers, setTickers] = useState<Ticker[]>([
+    { symbol: "NVDA", name: "NVIDIA Corporation", status: "Active" },
+    { symbol: "TSLA", name: "Tesla, Inc.", status: "Active" },
+    { symbol: "AAPL", name: "Apple Inc.", status: "Active" },
+    { symbol: "MSFT", name: "Microsoft Corporation", status: "Active" },
+    { symbol: "GOOGL", name: "Alphabet Inc.", status: "Active" },
+  ]);
+
+  const [newTickerSymbol, setNewTickerSymbol] = useState("");
+  const [newTickerName, setNewTickerName] = useState("");
+  const [isAddTickerOpen, setIsAddTickerOpen] = useState(false);
+
+  const handleAddTicker = () => {
+    if (!newTickerSymbol || !newTickerName) {
+      toast({
+        title: "Error",
+        description: "Please fill in both symbol and name.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (tickers.some(t => t.symbol === newTickerSymbol.toUpperCase())) {
+      toast({
+        title: "Error",
+        description: "Ticker already exists in watchlist.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setTickers([...tickers, { 
+      symbol: newTickerSymbol.toUpperCase(), 
+      name: newTickerName, 
+      status: "Active" 
+    }]);
+    
+    setNewTickerSymbol("");
+    setNewTickerName("");
+    setIsAddTickerOpen(false);
+    
+    toast({
+      title: "Ticker Added",
+      description: `Successfully added ${newTickerSymbol.toUpperCase()} to watchlist.`,
+    });
+  };
+
+  const handleDeleteTicker = (symbol: string) => {
+    setTickers(tickers.filter(t => t.symbol !== symbol));
+    toast({
+      title: "Ticker Removed",
+      description: `Removed ${symbol} from watchlist.`,
+    });
+  };
+
+  const toggleTickerStatus = (symbol: string) => {
+    setTickers(tickers.map(t => {
+      if (t.symbol === symbol) {
+        return { ...t, status: t.status === "Active" ? "Inactive" : "Active" };
+      }
+      return t;
+    }));
+  };
+
   return (
     <Layout>
       <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -26,20 +102,58 @@ export default function Settings() {
                   <CardTitle>Watchlist</CardTitle>
                   <CardDescription>Tickers currently being monitored by the agent.</CardDescription>
                 </div>
-                <Button size="sm" className="gap-2">
-                  <Plus className="h-4 w-4" /> Add Ticker
-                </Button>
+                
+                <Dialog open={isAddTickerOpen} onOpenChange={setIsAddTickerOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="gap-2">
+                      <Plus className="h-4 w-4" /> Add Ticker
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add New Ticker</DialogTitle>
+                      <DialogDescription>
+                        Enter the ticker symbol and company name to start monitoring.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="symbol" className="text-right">
+                          Symbol
+                        </Label>
+                        <Input
+                          id="symbol"
+                          value={newTickerSymbol}
+                          onChange={(e) => setNewTickerSymbol(e.target.value.toUpperCase())}
+                          placeholder="e.g. AMD"
+                          className="col-span-3"
+                          maxLength={5}
+                        />
+                      </div>
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="name" className="text-right">
+                          Name
+                        </Label>
+                        <Input
+                          id="name"
+                          value={newTickerName}
+                          onChange={(e) => setNewTickerName(e.target.value)}
+                          placeholder="e.g. Advanced Micro Devices"
+                          className="col-span-3"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={handleAddTicker}>Add to Watchlist</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  { symbol: "NVDA", name: "NVIDIA Corporation", status: "Active" },
-                  { symbol: "TSLA", name: "Tesla, Inc.", status: "Active" },
-                  { symbol: "AAPL", name: "Apple Inc.", status: "Active" },
-                  { symbol: "MSFT", name: "Microsoft Corporation", status: "Active" },
-                  { symbol: "GOOGL", name: "Alphabet Inc.", status: "Active" },
-                ].map((ticker) => (
+                {tickers.map((ticker) => (
                   <div key={ticker.symbol} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card/50 hover:bg-card transition-colors group">
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">
@@ -51,15 +165,34 @@ export default function Settings() {
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      <Badge variant="secondary" className="bg-success/10 text-success hover:bg-success/20 border-success/20">
+                      <Badge 
+                        variant="secondary" 
+                        className={`cursor-pointer transition-colors ${
+                          ticker.status === "Active" 
+                            ? "bg-success/10 text-success hover:bg-success/20 border-success/20" 
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"
+                        }`}
+                        onClick={() => toggleTickerStatus(ticker.symbol)}
+                      >
                         {ticker.status}
                       </Badge>
-                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => handleDeleteTicker(ticker.symbol)}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
                 ))}
+                
+                {tickers.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg">
+                    No tickers in watchlist. Add one to start monitoring.
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

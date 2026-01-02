@@ -1,11 +1,11 @@
 import { Layout } from "@/components/layout";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { mockEvents } from "@/lib/mock-data";
 import { EventCard } from "@/components/event-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Download, Filter, TrendingUp } from "lucide-react";
+import { ArrowLeft, Download, Filter, TrendingUp, ChevronDown } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useState } from "react";
@@ -16,9 +16,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const AVAILABLE_TICKERS = ["NVDA", "TSLA", "AAPL", "MSFT", "GOOGL"];
 
 export default function TickerView() {
   const [match, params] = useRoute("/ticker/:symbol");
+  const [location, setLocation] = useLocation();
   const symbol = params?.symbol || "NVDA";
   const [eventTypeFilter, setEventTypeFilter] = useState<string>("ALL");
   
@@ -48,8 +59,29 @@ export default function TickerView() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
-               <h1 className="text-4xl font-bold font-serif">{symbol}</h1>
-               <Badge variant="outline" className="text-sm">NASDAQ</Badge>
+               <DropdownMenu>
+                 <DropdownMenuTrigger asChild>
+                   <Button variant="ghost" className="h-auto p-0 hover:bg-transparent font-bold text-4xl font-serif flex items-baseline gap-2 group">
+                     {symbol}
+                     <ChevronDown className="h-6 w-6 text-muted-foreground opacity-50 group-hover:opacity-100 transition-opacity" />
+                   </Button>
+                 </DropdownMenuTrigger>
+                 <DropdownMenuContent align="start" className="w-56">
+                   <DropdownMenuLabel>Switch Ticker</DropdownMenuLabel>
+                   <DropdownMenuSeparator />
+                   {AVAILABLE_TICKERS.map((ticker) => (
+                     <DropdownMenuItem 
+                       key={ticker}
+                       className="cursor-pointer"
+                       onClick={() => setLocation(`/ticker/${ticker}`)}
+                     >
+                       {ticker}
+                       {ticker === symbol && <TrendingUp className="ml-auto h-4 w-4 opacity-50" />}
+                     </DropdownMenuItem>
+                   ))}
+                 </DropdownMenuContent>
+               </DropdownMenu>
+               <Badge variant="outline" className="text-sm self-start mt-2">NASDAQ</Badge>
             </div>
             <p className="text-muted-foreground">Portfolio Monitoring</p>
           </div>
