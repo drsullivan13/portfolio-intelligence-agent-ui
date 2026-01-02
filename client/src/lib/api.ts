@@ -54,3 +54,60 @@ export async function checkHealth(): Promise<{ status: string; timestamp: string
   
   return response.json();
 }
+
+export interface WatchlistTicker {
+  symbol: string;
+  name: string;
+  status: "Active" | "Inactive";
+}
+
+export interface Watchlist {
+  user_id: string;
+  tickers: WatchlistTicker[];
+  updated_at: string | null;
+  created_at: string | null;
+}
+
+export async function fetchWatchlist(): Promise<Watchlist> {
+  const response = await fetch(`${API_BASE}/watchlist`);
+  
+  if (!response.ok) {
+    throw new Error("Failed to fetch watchlist");
+  }
+  
+  const data = await response.json();
+  return data.watchlist;
+}
+
+export async function updateWatchlist(tickers: WatchlistTicker[]): Promise<Watchlist> {
+  const response = await fetch(`${API_BASE}/watchlist`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tickers }),
+  });
+  
+  if (!response.ok) {
+    throw new Error("Failed to update watchlist");
+  }
+  
+  const data = await response.json();
+  return data.watchlist;
+}
+
+export interface CurrentUser {
+  id: string;
+  username: string;
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser> {
+  const response = await fetch(`${API_BASE}/users/current`);
+  
+  if (!response.ok) {
+    throw new Error("Failed to fetch current user");
+  }
+  
+  const data = await response.json();
+  return data.user;
+}

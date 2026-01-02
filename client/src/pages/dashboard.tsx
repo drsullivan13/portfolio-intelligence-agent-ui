@@ -83,40 +83,41 @@ export default function Dashboard() {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
         {metricsLoading ? (
-          <>
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-          </>
+          [1, 2, 3, 4].map((i) => (
+            <Skeleton key={`skeleton-${i}`} className="h-32" />
+          ))
         ) : metrics ? (
-          <>
+          [
             <StatsCard 
+              key="total-events"
               title="Total Events" 
               value={metrics.total_events} 
               icon={Calendar} 
               trend="+12% from yesterday"
               trendUp={true}
-            />
+            />,
             <StatsCard 
+              key="analyzed"
               title="Analyzed" 
               value={metrics.events_by_status.ANALYZED} 
               icon={CheckCircle2} 
               iconColor="text-success"
-            />
+            />,
             <StatsCard 
+              key="news"
               title="News Articles" 
               value={metrics.events_by_type.NEWS} 
               icon={Newspaper} 
               iconColor="text-blue-400"
-            />
+            />,
             <StatsCard 
+              key="sec-filings"
               title="SEC Filings" 
               value={metrics.events_by_type.SEC_FILING} 
               icon={FileText} 
               iconColor="text-amber-400"
             />
-          </>
+          ]
         ) : null}
       </div>
 
@@ -175,11 +176,9 @@ export default function Dashboard() {
         </div>
         <div className="grid gap-4">
           {eventsLoading ? (
-            <>
-              <Skeleton className="h-48" />
-              <Skeleton className="h-48" />
-              <Skeleton className="h-48" />
-            </>
+            [1, 2, 3].map((i) => (
+              <Skeleton key={`event-skeleton-${i}`} className="h-48" />
+            ))
           ) : sortedEvents.length > 0 ? (
             sortedEvents.map(event => (
               <EventCard key={event.event_id} event={event} />

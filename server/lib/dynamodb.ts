@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = new DynamoDBClient({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -11,3 +11,4 @@ const client = new DynamoDBClient({
 
 export const docClient = DynamoDBDocumentClient.from(client);
 export const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME || 'portfolio-events';
+export const WATCHLIST_TABLE_NAME = process.env.WATCHLIST_DYNAMODB_TABLE_NAME || 'user-watchlists';

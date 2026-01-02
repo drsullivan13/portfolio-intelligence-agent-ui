@@ -1,8 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { docClient, TABLE_NAME } from "./lib/dynamodb";
-import { ScanCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME } from "./lib/dynamodb";
+import { ScanCommand, QueryCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -11,9 +11,11 @@ export async function registerRoutes(
   // GET /api/events - Fetch all events with optional filtering
   app.get("/api/events", async (req, res) => {
     try {
-      const { ticker, status, limit = "50" } = req.query;
+      const userId = "admin-001"; // TODO: Get from authenticated user
+      const { ticker, status, limit = "100" } = req.query;
       
       let command;
+      let events: any[] = [];
       
       if (ticker) {
         // Use GSI to query by ticker
@@ -27,16 +29,45 @@ export async function registerRoutes(
           ScanIndexForward: false, // Sort descending by timestamp
           Limit: parseInt(limit as string)
         });
+        const response = await docClient.send(command);
+        events = response.Items || [];
       } else {
-        // Scan all events
-        command = new ScanCommand({
-          TableName: TABLE_NAME,
-          Limit: parseInt(limit as string)
-        });
+        // Try to use user-timestamp-index GSI to get user's events
+        try {
+          command = new QueryCommand({
+            TableName: TABLE_NAME,
+            IndexName: "user-timestamp-index",
+            KeyConditionExpression: "user_id = :userId",
+            ExpressionAttributeValues: {
+              ":userId": userId
+            },
+            ScanIndexForward: false, // Sort descending by timestamp
+            Limit: parseInt(limit as string)
+          });
+          const response = await docClient.send(command);
+          events = response.Items || [];
+          
+          // If no events found for user, fallback to scan
+          if (events.length === 0) {
+            console.log("No events found for user, falling back to scan");
+            const scanCommand = new ScanCommand({
+              TableName: TABLE_NAME,
+              Limit: parseInt(limit as string)
+            });
+            const scanResponse = await docClient.send(scanCommand);
+            events = scanResponse.Items || [];
+          }
+        } catch (gsiError) {
+          // Fallback to scan if GSI doesn't exist yet
+          console.log("Falling back to scan - user-timestamp-index error:", gsiError);
+          command = new ScanCommand({
+            TableName: TABLE_NAME,
+            Limit: parseInt(limit as string)
+          });
+          const response = await docClient.send(command);
+          events = response.Items || [];
+        }
       }
-      
-      const response = await docClient.send(command);
-      let events = response.Items || [];
       
       // Filter by status if provided
       if (status) {
@@ -97,12 +128,41 @@ export async function registerRoutes(
   // GET /api/portfolio - Calculate portfolio metrics
   app.get("/api/portfolio", async (req, res) => {
     try {
-      const command = new ScanCommand({
-        TableName: TABLE_NAME
-      });
+      const userId = "admin-001"; // TODO: Get from authenticated user
+      let events: any[] = [];
       
-      const response = await docClient.send(command);
-      const events = response.Items || [];
+      // Try to use user-timestamp-index GSI to get user's events
+      try {
+        const command = new QueryCommand({
+          TableName: TABLE_NAME,
+          IndexName: "user-timestamp-index",
+          KeyConditionExpression: "user_id = :userId",
+          ExpressionAttributeValues: {
+            ":userId": userId
+          },
+          ScanIndexForward: false
+        });
+        const response = await docClient.send(command);
+        events = response.Items || [];
+        
+        // If no events found for user, fallback to scan
+        if (events.length === 0) {
+          console.log("No events found for user in portfolio, falling back to scan");
+          const scanCommand = new ScanCommand({
+            TableName: TABLE_NAME
+          });
+          const scanResponse = await docClient.send(scanCommand);
+          events = scanResponse.Items || [];
+        }
+      } catch (gsiError) {
+        // Fallback to scan if GSI doesn't exist yet
+        console.log("Falling back to scan for portfolio metrics:", gsiError);
+        const command = new ScanCommand({
+          TableName: TABLE_NAME
+        });
+        const response = await docClient.send(command);
+        events = response.Items || [];
+      }
       
       // Calculate metrics
       const metrics = {
@@ -179,6 +239,117 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: "Failed to fetch users"
+      });
+    }
+  });
+
+  // GET /api/watchlist - Get user's watchlist
+  app.get("/api/watchlist", async (req, res) => {
+    try {
+      const userId = "admin-001"; // TODO: Get from authenticated user
+      
+      const command = new GetCommand({
+        TableName: WATCHLIST_TABLE_NAME,
+        Key: {
+          user_id: userId
+        }
+      });
+      
+      const response = await docClient.send(command);
+      
+      if (!response.Item) {
+        // Return empty watchlist if none exists
+        return res.json({
+          success: true,
+          watchlist: {
+            user_id: userId,
+            tickers: [],
+            updated_at: null,
+            created_at: null
+          }
+        });
+      }
+      
+      // Normalize tickers - convert strings to objects if needed
+      let tickers = response.Item.tickers || [];
+      tickers = tickers.map((ticker: any) => {
+        if (typeof ticker === 'string') {
+          // Convert legacy string format to object format
+          return {
+            symbol: ticker,
+            name: ticker, // Use symbol as name for legacy data
+            status: "Active" as const
+          };
+        }
+        return ticker;
+      });
+      
+      res.json({
+        success: true,
+        watchlist: {
+          ...response.Item,
+          tickers
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching watchlist:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch watchlist"
+      });
+    }
+  });
+
+  // PUT /api/watchlist - Update user's watchlist
+  app.put("/api/watchlist", async (req, res) => {
+    try {
+      const userId = "admin-001"; // TODO: Get from authenticated user
+      const { tickers } = req.body;
+      
+      if (!Array.isArray(tickers)) {
+        return res.status(400).json({
+          success: false,
+          error: "Tickers must be an array"
+        });
+      }
+      
+      const now = new Date().toISOString();
+      
+      // Get existing item to preserve created_at
+      const getCommand = new GetCommand({
+        TableName: WATCHLIST_TABLE_NAME,
+        Key: { user_id: userId }
+      });
+      
+      const existing = await docClient.send(getCommand);
+      const createdAt = existing.Item?.created_at || now;
+      
+      const putCommand = new PutCommand({
+        TableName: WATCHLIST_TABLE_NAME,
+        Item: {
+          user_id: userId,
+          tickers: tickers,
+          updated_at: now,
+          created_at: createdAt
+        }
+      });
+      
+      await docClient.send(putCommand);
+      
+      res.json({
+        success: true,
+        watchlist: {
+          user_id: userId,
+          tickers: tickers,
+          updated_at: now,
+          created_at: createdAt
+        }
+      });
+    } catch (error) {
+      console.error("Error updating watchlist:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to update watchlist"
       });
     }
   });
