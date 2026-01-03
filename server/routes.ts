@@ -363,6 +363,7 @@ export async function registerRoutes(
   app.get("/api/watchlist", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
+      console.log(`[Watchlist] Fetching watchlist for user: ${userId}, table: ${WATCHLIST_TABLE_NAME}`);
       
       const command = new GetCommand({
         TableName: WATCHLIST_TABLE_NAME,
@@ -372,6 +373,7 @@ export async function registerRoutes(
       });
       
       const response = await docClient.send(command);
+      console.log(`[Watchlist] DynamoDB response:`, JSON.stringify(response.Item || 'NO_ITEM_FOUND'));
       
       if (!response.Item) {
         // Return empty watchlist if none exists
