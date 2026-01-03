@@ -152,22 +152,24 @@ export async function registerRoutes(
   // ==================== PROTECTED ROUTES ====================
   
   // GET /api/events - Fetch all events with optional filtering
-  app.get("/api/events", async (req, res) => {
+  app.get("/api/events", requireAuth, async (req, res) => {
     try {
-      const userId = "admin-001"; // TODO: Get from authenticated user
+      const userId = req.session.userId!;
       const { ticker, status, limit = "100" } = req.query;
       
       let command;
       let events: any[] = [];
       
       if (ticker) {
-        // Use GSI to query by ticker
+        // Use GSI to query by ticker, then filter by user for security
         command = new QueryCommand({
           TableName: TABLE_NAME,
           IndexName: "ticker-timestamp-index",
           KeyConditionExpression: "ticker = :ticker",
+          FilterExpression: "user_id = :userId",
           ExpressionAttributeValues: {
-            ":ticker": ticker
+            ":ticker": ticker,
+            ":userId": userId
           },
           ScanIndexForward: false, // Sort descending by timestamp
           Limit: parseInt(limit as string)
@@ -190,25 +192,14 @@ export async function registerRoutes(
           const response = await docClient.send(command);
           events = response.Items || [];
           
-          // If no events found for user, fallback to scan
+          // If no events found for user, return empty array (don't expose other users' data)
           if (events.length === 0) {
-            console.log("No events found for user, falling back to scan");
-            const scanCommand = new ScanCommand({
-              TableName: TABLE_NAME,
-              Limit: parseInt(limit as string)
-            });
-            const scanResponse = await docClient.send(scanCommand);
-            events = scanResponse.Items || [];
+            console.log("No events found for user:", userId);
           }
         } catch (gsiError) {
-          // Fallback to scan if GSI doesn't exist yet
-          console.log("Falling back to scan - user-timestamp-index error:", gsiError);
-          command = new ScanCommand({
-            TableName: TABLE_NAME,
-            Limit: parseInt(limit as string)
-          });
-          const response = await docClient.send(command);
-          events = response.Items || [];
+          // If GSI doesn't exist, return empty array for security (don't scan all data)
+          console.log("user-timestamp-index GSI error:", gsiError);
+          events = [];
         }
       }
       
@@ -235,9 +226,10 @@ export async function registerRoutes(
   });
 
   // GET /api/events/:id - Fetch single event by ID
-  app.get("/api/events/:id", async (req, res) => {
+  app.get("/api/events/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+      const userId = req.session.userId!;
       
       const command = new GetCommand({
         TableName: TABLE_NAME,
@@ -255,6 +247,14 @@ export async function registerRoutes(
         });
       }
       
+      // Verify event belongs to the authenticated user
+      if (response.Item.user_id !== userId) {
+        return res.status(403).json({
+          success: false,
+          error: "Access denied"
+        });
+      }
+      
       res.json({
         success: true,
         event: response.Item
@@ -269,9 +269,9 @@ export async function registerRoutes(
   });
 
   // GET /api/portfolio - Calculate portfolio metrics
-  app.get("/api/portfolio", async (req, res) => {
+  app.get("/api/portfolio", requireAuth, async (req, res) => {
     try {
-      const userId = "admin-001"; // TODO: Get from authenticated user
+      const userId = req.session.userId!;
       let events: any[] = [];
       
       // Try to use user-timestamp-index GSI to get user's events
@@ -288,23 +288,14 @@ export async function registerRoutes(
         const response = await docClient.send(command);
         events = response.Items || [];
         
-        // If no events found for user, fallback to scan
+        // If no events found for user, just use empty array
         if (events.length === 0) {
-          console.log("No events found for user in portfolio, falling back to scan");
-          const scanCommand = new ScanCommand({
-            TableName: TABLE_NAME
-          });
-          const scanResponse = await docClient.send(scanCommand);
-          events = scanResponse.Items || [];
+          console.log("No events found for user in portfolio:", userId);
         }
       } catch (gsiError) {
-        // Fallback to scan if GSI doesn't exist yet
-        console.log("Falling back to scan for portfolio metrics:", gsiError);
-        const command = new ScanCommand({
-          TableName: TABLE_NAME
-        });
-        const response = await docClient.send(command);
-        events = response.Items || [];
+        // If GSI doesn't exist, return empty array for security
+        console.log("user-timestamp-index GSI error in portfolio:", gsiError);
+        events = [];
       }
       
       // Calculate metrics
@@ -341,10 +332,11 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/users/current - Get current user (admin for now)
-  app.get("/api/users/current", async (req, res) => {
+  // GET /api/users/current - Get current user
+  app.get("/api/users/current", requireAuth, async (req, res) => {
     try {
-      const user = await getStorage().getUser("admin-001");
+      const userId = req.session.userId!;
+      const user = await getStorage().getUser(userId);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -367,29 +359,10 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/users - Get all users
-  app.get("/api/users", async (req, res) => {
-    try {
-      const users = await getStorage().getAllUsers();
-      // Don't expose passwords
-      const safeUsers = users.map(({ password, ...user }) => user);
-      res.json({
-        success: true,
-        users: safeUsers
-      });
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({
-        success: false,
-        error: "Failed to fetch users"
-      });
-    }
-  });
-
   // GET /api/watchlist - Get user's watchlist
-  app.get("/api/watchlist", async (req, res) => {
+  app.get("/api/watchlist", requireAuth, async (req, res) => {
     try {
-      const userId = "admin-001"; // TODO: Get from authenticated user
+      const userId = req.session.userId!;
       
       const command = new GetCommand({
         TableName: WATCHLIST_TABLE_NAME,
@@ -444,9 +417,9 @@ export async function registerRoutes(
   });
 
   // PUT /api/watchlist - Update user's watchlist
-  app.put("/api/watchlist", async (req, res) => {
+  app.put("/api/watchlist", requireAuth, async (req, res) => {
     try {
-      const userId = "admin-001"; // TODO: Get from authenticated user
+      const userId = req.session.userId!;
       const { tickers } = req.body;
       
       if (!Array.isArray(tickers)) {
