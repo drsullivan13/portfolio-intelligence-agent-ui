@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
 import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME } from "./lib/dynamodb";
-import { ScanCommand, QueryCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, QueryCommand, GetCommand, PutCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { verifyPassword, requireAuth, getCurrentUser } from "./auth";
 import { z } from "zod";
 
@@ -10,6 +10,36 @@ const authSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
+
+// Helper to batch-get events efficiently
+async function batchGetEvents(eventIds: string[]) {
+  if (eventIds.length === 0) return [];
+
+  const batches = chunkArray(eventIds, 100); // DynamoDB limit
+  const allEvents = [];
+
+  for (const batch of batches) {
+    const response = await docClient.send(new BatchGetCommand({
+      RequestItems: {
+        [TABLE_NAME]: {
+          Keys: batch.map(id => ({ event_id: id }))
+        }
+      }
+    }));
+    allEvents.push(...(response.Responses?.[TABLE_NAME] || []));
+  }
+
+  return allEvents;
+}
+
+// Helper to chunk arrays
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -156,61 +186,59 @@ export async function registerRoutes(
     try {
       const userId = req.session.userId!;
       const { ticker, status, limit = "100" } = req.query;
-      
-      let command;
+
       let events: any[] = [];
-      
+
       if (ticker) {
-        // Use GSI to query by ticker, then filter by user for security
-        command = new QueryCommand({
-          TableName: TABLE_NAME,
-          IndexName: "ticker-timestamp-index",
-          KeyConditionExpression: "ticker = :ticker",
-          FilterExpression: "user_id = :userId",
+        // SECURITY: Query user-events to get only events this user is authorized to see
+        const userEventsCommand = new QueryCommand({
+          TableName: 'user-events',
+          KeyConditionExpression: 'user_id = :userId',
+          FilterExpression: 'ticker = :ticker',
           ExpressionAttributeValues: {
-            ":ticker": ticker,
-            ":userId": userId
+            ':userId': userId,
+            ':ticker': ticker
           },
-          ScanIndexForward: false, // Sort descending by timestamp
+          ScanIndexForward: false,
+          Limit: parseInt(limit as string) * 2 // Fetch more to account for filtering
+        });
+
+        const userEventsResponse = await docClient.send(userEventsCommand);
+        const eventIds = userEventsResponse.Items?.map(item => item.event_id) || [];
+
+        // Batch get event details from portfolio-events
+        events = await batchGetEvents(eventIds);
+      } else {
+        // Query user-events junction table for user's events
+        const userEventsCommand = new QueryCommand({
+          TableName: 'user-events',
+          KeyConditionExpression: 'user_id = :userId',
+          ExpressionAttributeValues: {
+            ':userId': userId
+          },
+          ScanIndexForward: false,
           Limit: parseInt(limit as string)
         });
-        const response = await docClient.send(command);
-        events = response.Items || [];
-      } else {
-        // Try to use user-timestamp-index GSI to get user's events
-        try {
-          command = new QueryCommand({
-            TableName: TABLE_NAME,
-            IndexName: "user-timestamp-index",
-            KeyConditionExpression: "user_id = :userId",
-            ExpressionAttributeValues: {
-              ":userId": userId
-            },
-            ScanIndexForward: false, // Sort descending by timestamp
-            Limit: parseInt(limit as string)
-          });
-          const response = await docClient.send(command);
-          events = response.Items || [];
-          
-          // If no events found for user, return empty array (don't expose other users' data)
-          if (events.length === 0) {
-            console.log("No events found for user:", userId);
-          }
-        } catch (gsiError) {
-          // If GSI doesn't exist, return empty array for security (don't scan all data)
-          console.log("user-timestamp-index GSI error:", gsiError);
-          events = [];
+
+        const userEventsResponse = await docClient.send(userEventsCommand);
+        const eventIds = userEventsResponse.Items?.map(item => item.event_id) || [];
+
+        // Batch get event details
+        events = await batchGetEvents(eventIds);
+
+        if (events.length === 0) {
+          console.log("No events found for user:", userId);
         }
       }
-      
+
       // Filter by status if provided
       if (status) {
         events = events.filter(event => event.status === status);
       }
-      
+
       // Sort by timestamp descending
       events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      
+
       res.json({
         success: true,
         count: events.length,
@@ -230,34 +258,45 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       const userId = req.session.userId!;
-      
-      const command = new GetCommand({
-        TableName: TABLE_NAME,
+
+      // SECURITY: First check if user has access to this event via junction table
+      const userEventCommand = new GetCommand({
+        TableName: 'user-events',
         Key: {
+          user_id: userId,
           event_id: id
         }
       });
-      
-      const response = await docClient.send(command);
-      
-      if (!response.Item) {
-        return res.status(404).json({
-          success: false,
-          error: "Event not found"
-        });
-      }
-      
-      // Verify event belongs to the authenticated user
-      if (response.Item.user_id !== userId) {
+
+      const userEventResponse = await docClient.send(userEventCommand);
+
+      if (!userEventResponse.Item) {
         return res.status(403).json({
           success: false,
           error: "Access denied"
         });
       }
-      
+
+      // User has access, now fetch the event details
+      const eventCommand = new GetCommand({
+        TableName: TABLE_NAME,
+        Key: {
+          event_id: id
+        }
+      });
+
+      const eventResponse = await docClient.send(eventCommand);
+
+      if (!eventResponse.Item) {
+        return res.status(404).json({
+          success: false,
+          error: "Event not found"
+        });
+      }
+
       res.json({
         success: true,
-        event: response.Item
+        event: eventResponse.Item
       });
     } catch (error) {
       console.error("Error fetching event:", error);
@@ -272,30 +311,25 @@ export async function registerRoutes(
   app.get("/api/portfolio", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
-      let events: any[] = [];
-      
-      // Try to use user-timestamp-index GSI to get user's events
-      try {
-        const command = new QueryCommand({
-          TableName: TABLE_NAME,
-          IndexName: "user-timestamp-index",
-          KeyConditionExpression: "user_id = :userId",
-          ExpressionAttributeValues: {
-            ":userId": userId
-          },
-          ScanIndexForward: false
-        });
-        const response = await docClient.send(command);
-        events = response.Items || [];
-        
-        // If no events found for user, just use empty array
-        if (events.length === 0) {
-          console.log("No events found for user in portfolio:", userId);
-        }
-      } catch (gsiError) {
-        // If GSI doesn't exist, return empty array for security
-        console.log("user-timestamp-index GSI error in portfolio:", gsiError);
-        events = [];
+
+      // Query user-events junction table
+      const userEventsCommand = new QueryCommand({
+        TableName: 'user-events',
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: {
+          ':userId': userId
+        },
+        ScanIndexForward: false
+      });
+
+      const userEventsResponse = await docClient.send(userEventsCommand);
+      const eventIds = userEventsResponse.Items?.map(item => item.event_id) || [];
+
+      // Batch get event details
+      const events = await batchGetEvents(eventIds);
+
+      if (events.length === 0) {
+        console.log("No events found for user in portfolio:", userId);
       }
       
       // Calculate metrics
