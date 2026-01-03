@@ -1,11 +1,13 @@
 import { type User, type InsertUser, users } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
+import { hashPassword } from "./auth";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  createUserWithHashedPassword(username: string, password: string): Promise<User>;
   getAllUsers(): Promise<User[]>;
   seedAdminUser(): Promise<void>;
 }
@@ -41,21 +43,32 @@ export class DatabaseStorage implements IStorage {
     }
     const existingAdmin = await this.getUserByUsername("admin");
     if (!existingAdmin) {
+      const hashedPassword = await hashPassword("admin123");
       await db.insert(users).values({
         id: "admin-001",
         username: "admin",
-        password: "admin123",
+        password: hashedPassword,
       }).onConflictDoNothing();
       console.log("Admin user seeded successfully (id: admin-001, username: admin)");
     } else {
       console.log("Admin user already exists");
     }
   }
+
+  async createUserWithHashedPassword(username: string, password: string): Promise<User> {
+    if (!db) throw new Error("Database not configured");
+    const hashedPassword = await hashPassword(password);
+    const [user] = await db.insert(users).values({
+      username,
+      password: hashedPassword,
+    }).returning();
+    return user;
+  }
 }
 
 export class MockStorage implements IStorage {
   private users: Map<string, User> = new Map([
-    ["admin-001", { id: "admin-001", username: "admin", password: "admin123" }]
+    ["admin-001", { id: "admin-001", username: "admin", password: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewKy3xDz6r4UQx.K", createdAt: new Date() }]
   ]);
 
   async getUser(id: string): Promise<User | undefined> {
@@ -67,7 +80,14 @@ export class MockStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const user: User = { id: `user-${Date.now()}`, username: insertUser.username, password: insertUser.password };
+    const user: User = { id: `user-${Date.now()}`, username: insertUser.username, password: insertUser.password, createdAt: new Date() };
+    this.users.set(user.id, user);
+    return user;
+  }
+
+  async createUserWithHashedPassword(username: string, password: string): Promise<User> {
+    const hashedPassword = await hashPassword(password);
+    const user: User = { id: `user-${Date.now()}`, username, password: hashedPassword, createdAt: new Date() };
     this.users.set(user.id, user);
     return user;
   }

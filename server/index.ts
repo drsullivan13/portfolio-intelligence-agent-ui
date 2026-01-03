@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initializeStorage, getStorage } from "./storage";
 import { waitForDatabase } from "./db";
+import { setupAuth } from "./auth";
 
 const app = express();
 const httpServer = createServer(app);
@@ -67,6 +68,9 @@ app.use((req, res, next) => {
   
   // Initialize storage based on database availability
   const storage = initializeStorage(dbReady);
+  
+  // Setup authentication and sessions
+  setupAuth(app);
   
   // Seed admin user on startup
   try {

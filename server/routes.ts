@@ -3,11 +3,154 @@ import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
 import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME } from "./lib/dynamodb";
 import { ScanCommand, QueryCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { verifyPassword, requireAuth, getCurrentUser } from "./auth";
+import { z } from "zod";
+
+const authSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  // ==================== AUTH ROUTES ====================
+  
+  // POST /api/auth/signup - Create new user account
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const validation = authSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error.errors[0].message,
+        });
+      }
+
+      const { username, password } = validation.data;
+      const storage = getStorage();
+      
+      // Check if username already exists
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          error: "Username already taken",
+        });
+      }
+
+      // Create user with hashed password
+      const user = await storage.createUserWithHashedPassword(username, password);
+
+      // Create empty watchlist in DynamoDB for new user
+      try {
+        const putCommand = new PutCommand({
+          TableName: WATCHLIST_TABLE_NAME,
+          Item: {
+            user_id: user.id,
+            tickers: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        });
+        await docClient.send(putCommand);
+        console.log(`Created watchlist for new user: ${user.id}`);
+      } catch (watchlistError) {
+        console.error("Failed to create watchlist in DynamoDB:", watchlistError);
+        // Don't fail signup if watchlist creation fails
+      }
+
+      // Set session
+      req.session.userId = user.id;
+      req.session.username = user.username;
+
+      res.json({
+        success: true,
+        user: { id: user.id, username: user.username },
+      });
+    } catch (error) {
+      console.error("Signup error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to create account",
+      });
+    }
+  });
+
+  // POST /api/auth/login - Authenticate user
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const validation = authSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error.errors[0].message,
+        });
+      }
+
+      const { username, password } = validation.data;
+      const storage = getStorage();
+
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid username or password",
+        });
+      }
+
+      const isValid = await verifyPassword(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid username or password",
+        });
+      }
+
+      // Set session
+      req.session.userId = user.id;
+      req.session.username = user.username;
+
+      res.json({
+        success: true,
+        user: { id: user.id, username: user.username },
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to login",
+      });
+    }
+  });
+
+  // POST /api/auth/logout - End user session
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          error: "Failed to logout",
+        });
+      }
+      res.json({ success: true });
+    });
+  });
+
+  // GET /api/auth/me - Get current authenticated user
+  app.get("/api/auth/me", (req, res) => {
+    const user = getCurrentUser(req);
+    if (user) {
+      res.json({ success: true, user });
+    } else {
+      res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+  });
+
+  // ==================== PROTECTED ROUTES ====================
+  
   // GET /api/events - Fetch all events with optional filtering
   app.get("/api/events", async (req, res) => {
     try {

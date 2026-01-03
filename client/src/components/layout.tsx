@@ -1,13 +1,17 @@
 import { Link } from "wouter";
-import { Bell, Search, Menu, LayoutDashboard, Settings as SettingsIcon, PieChart, TrendingUp } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, Settings as SettingsIcon, TrendingUp } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { useAuth } from "@/lib/auth";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const { user, logout } = useAuth();
 
   const isActive = (path: string) => location === path;
+  const userInitials = user?.username?.slice(0, 2).toUpperCase() || "??";
+  const displayName = user?.username || "User";
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col md:flex-row">
@@ -41,16 +45,26 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </Link>
         </nav>
 
-        <div className="mt-auto pt-4 border-t border-border">
+        <div className="mt-auto pt-4 border-t border-border space-y-3">
           <div className="flex items-center gap-3 px-2">
-            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-              <span className="text-xs font-medium">JS</span>
+            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <span className="text-xs font-medium text-primary">{userInitials}</span>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">Jobs, Steve</span>
-              <span className="text-xs text-muted-foreground">Portfolio Mgr</span>
+            <div className="flex flex-col flex-1 min-w-0">
+              <span className="text-sm font-medium truncate">{displayName}</span>
+              <span className="text-xs text-muted-foreground">Portfolio Manager</span>
             </div>
           </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="w-full justify-start gap-2 text-muted-foreground hover:text-destructive"
+            onClick={logout}
+            data-testid="button-logout"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </Button>
         </div>
       </aside>
 
@@ -95,6 +109,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </Button>
               </Link>
             </nav>
+            <div className="mt-auto pt-4 border-t border-border">
+              <div className="flex items-center gap-3 px-2 mb-3">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <span className="text-xs font-medium text-primary">{userInitials}</span>
+                </div>
+                <span className="text-sm font-medium">{displayName}</span>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="w-full justify-start gap-2 text-muted-foreground hover:text-destructive"
+                onClick={logout}
+              >
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </Button>
+            </div>
           </SheetContent>
         </Sheet>
       </header>
