@@ -12,3 +12,4 @@ const client = new DynamoDBClient({
 export const docClient = DynamoDBDocumentClient.from(client);
 export const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME || 'portfolio-events';
 export const WATCHLIST_TABLE_NAME = process.env.WATCHLIST_DYNAMODB_TABLE_NAME || 'user-watchlists';
+export const USER_EVENTS_TABLE_NAME = process.env.USER_EVENTS_TABLE_NAME || 'user-events';

@@ -27,7 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function checkAuth() {
     try {
-      const res = await fetch("/api/auth/me");
+      const res = await fetch("/api/auth/me", {
+        credentials: 'include', // Send cookies with request
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.user) {
@@ -46,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include', // Send cookies with request
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
@@ -64,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include', // Send cookies with request
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
@@ -79,7 +83,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: 'include', // Send cookies with request
+      });
     } finally {
       setUser(null);
       setLocation("/login");

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
-import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME } from "./lib/dynamodb";
+import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME, USER_EVENTS_TABLE_NAME } from "./lib/dynamodb";
 import { ScanCommand, QueryCommand, GetCommand, PutCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { verifyPassword, requireAuth, getCurrentUser } from "./auth";
 import { z } from "zod";
@@ -192,7 +192,7 @@ export async function registerRoutes(
       if (ticker) {
         // SECURITY: Query user-events to get only events this user is authorized to see
         const userEventsCommand = new QueryCommand({
-          TableName: 'user-events',
+          TableName: USER_EVENTS_TABLE_NAME,
           KeyConditionExpression: 'user_id = :userId',
           FilterExpression: 'ticker = :ticker',
           ExpressionAttributeValues: {
@@ -211,7 +211,7 @@ export async function registerRoutes(
       } else {
         // Query user-events junction table for user's events
         const userEventsCommand = new QueryCommand({
-          TableName: 'user-events',
+          TableName: USER_EVENTS_TABLE_NAME,
           KeyConditionExpression: 'user_id = :userId',
           ExpressionAttributeValues: {
             ':userId': userId
@@ -261,7 +261,7 @@ export async function registerRoutes(
 
       // SECURITY: First check if user has access to this event via junction table
       const userEventCommand = new GetCommand({
-        TableName: 'user-events',
+        TableName: USER_EVENTS_TABLE_NAME,
         Key: {
           user_id: userId,
           event_id: id
@@ -314,7 +314,7 @@ export async function registerRoutes(
 
       // Query user-events junction table
       const userEventsCommand = new QueryCommand({
-        TableName: 'user-events',
+        TableName: USER_EVENTS_TABLE_NAME,
         KeyConditionExpression: 'user_id = :userId',
         ExpressionAttributeValues: {
           ':userId': userId
