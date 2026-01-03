@@ -24,6 +24,10 @@ Preferred communication style: Simple, everyday language.
 - **Build**: Custom build script using esbuild for server, Vite for client
 - **API Pattern**: RESTful endpoints under `/api/` prefix
 - **Static Serving**: Production serves built client from `dist/public`
+- **Authentication**: Session-based with bcrypt password hashing (12 salt rounds)
+  - Sessions stored in PostgreSQL via connect-pg-simple
+  - Protected routes use requireAuth middleware
+  - User-scoped data filtering on all event/watchlist queries
 
 ### Data Storage
 - **Primary Database**: PostgreSQL via Drizzle ORM for user data
@@ -49,6 +53,7 @@ Preferred communication style: Simple, everyday language.
   - Connection via `DATABASE_URL` environment variable
   - Migrations stored in `migrations/` directory
   - Push schema with `npm run db:push`
+  - `SESSION_SECRET` environment variable required for production (secure session cookies)
 
 ### Key NPM Packages
 - **@tanstack/react-query**: Server state management
