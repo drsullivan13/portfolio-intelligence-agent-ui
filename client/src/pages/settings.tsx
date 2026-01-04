@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Bell, Activity, Database, Shield, Plus, Trash2, RefreshCw, Loader2 } from "lucide-react";
+import { Bell, Activity, Database, Shield, Plus, Trash2, RefreshCw, Loader2, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ export default function Settings() {
   const [isAddTickerOpen, setIsAddTickerOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [showWebhookUrl, setShowWebhookUrl] = useState(false);
 
   // Fetch watchlist from DynamoDB
   const { data: watchlist, isLoading, refetch } = useQuery({
@@ -323,14 +324,32 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label htmlFor="webhook-url">Slack Webhook URL</Label>
                 <div className="flex gap-2">
-                  <Input
-                    id="webhook-url"
-                    type="url"
-                    placeholder="https://hooks.slack.com/services/..."
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    className="flex-1"
-                  />
+                  <div className="relative flex-1">
+                    <Input
+                      id="webhook-url"
+                      type={showWebhookUrl ? "text" : "password"}
+                      placeholder="https://hooks.slack.com/services/..."
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      className="pr-10"
+                    />
+                    {webhookUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                        onClick={() => setShowWebhookUrl(!showWebhookUrl)}
+                        aria-label={showWebhookUrl ? "Hide webhook URL" : "Show webhook URL"}
+                      >
+                        {showWebhookUrl ? (
+                          <EyeOff className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <Eye className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    )}
+                  </div>
                   <Button
                     variant="outline"
                     onClick={handleTestWebhook}
