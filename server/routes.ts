@@ -607,9 +607,7 @@ export async function registerRoutes(
         });
       }
 
-      // Send test message using axios (dynamically imported)
-      const axios = (await import('axios')).default;
-
+      // Send test message using Node.js built-in fetch
       const testMessage = {
         blocks: [
           {
@@ -639,12 +637,37 @@ export async function registerRoutes(
         ]
       };
 
-      await axios.post(webhook_url, testMessage, {
-        timeout: 5000,
-        headers: {
-          'Content-Type': 'application/json'
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      try {
+        const response = await fetch(webhook_url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(testMessage),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return res.status(400).json({
+            success: false,
+            error: `Slack returned error: ${response.status} - ${response.statusText}`
+          });
         }
-      });
+      } catch (fetchError: any) {
+        clearTimeout(timeout);
+        if (fetchError.name === 'AbortError') {
+          return res.status(408).json({
+            success: false,
+            error: "Webhook request timed out"
+          });
+        }
+        throw fetchError;
+      }
 
       res.json({
         success: true,
@@ -653,23 +676,9 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error testing webhook:", error);
 
-      if (error.code === 'ECONNABORTED') {
-        return res.status(408).json({
-          success: false,
-          error: "Webhook request timed out"
-        });
-      }
-
-      if (error.response) {
-        return res.status(400).json({
-          success: false,
-          error: `Slack returned error: ${error.response.status} - ${error.response.statusText}`
-        });
-      }
-
       res.status(500).json({
         success: false,
-        error: "Failed to send test message to webhook"
+        error: error.message || "Failed to send test message to webhook"
       });
     }
   });
