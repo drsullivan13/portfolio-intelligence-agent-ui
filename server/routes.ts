@@ -3,8 +3,12 @@ import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
 import { docClient, TABLE_NAME, WATCHLIST_TABLE_NAME, USER_EVENTS_TABLE_NAME } from "./lib/dynamodb";
 import { ScanCommand, QueryCommand, GetCommand, PutCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { verifyPassword, requireAuth, getCurrentUser } from "./auth";
 import { z } from "zod";
+
+// Initialize Lambda client for backfill invocations
+const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 const authSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
@@ -456,13 +460,39 @@ export async function registerRoutes(
   app.put("/api/watchlist", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
-      const { tickers } = req.body;
-      
+      const { tickers, webhook_url } = req.body;
+
       if (!Array.isArray(tickers)) {
         return res.status(400).json({
           success: false,
           error: "Tickers must be an array"
         });
+      }
+
+      // Validate webhook URL format if provided
+      if (webhook_url !== null && webhook_url !== undefined && webhook_url !== '') {
+        if (typeof webhook_url !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: "Webhook URL must be a string"
+          });
+        }
+
+        // Basic URL validation
+        try {
+          new URL(webhook_url);
+          if (!webhook_url.startsWith('https://hooks.slack.com/')) {
+            return res.status(400).json({
+              success: false,
+              error: "Invalid Slack webhook URL format. Must start with https://hooks.slack.com/"
+            });
+          }
+        } catch (e) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid webhook URL format"
+          });
+        }
       }
       
       const now = new Date().toISOString();
@@ -481,18 +511,61 @@ export async function registerRoutes(
         Item: {
           user_id: userId,
           tickers: tickers,
+          webhook_url: webhook_url || null,
           updated_at: now,
           created_at: createdAt
         }
       });
       
       await docClient.send(putCommand);
-      
+
+      // Determine which tickers were added
+      const oldTickers = existing.Item?.tickers?.map((t: any) =>
+        typeof t === 'string' ? t : t.symbol
+      ) || [];
+      const newTickerSymbols = tickers.map((t: any) =>
+        typeof t === 'string' ? t : t.symbol
+      );
+      const addedTickers = newTickerSymbols.filter((ticker: string) =>
+        !oldTickers.includes(ticker)
+      );
+      const removedTickers = oldTickers.filter((ticker: string) =>
+        !newTickerSymbols.includes(ticker)
+      );
+
+      console.log(`Watchlist updated for user: ${userId}`);
+      console.log(`Added tickers: ${addedTickers.length ? addedTickers.join(', ') : 'none'}`);
+      console.log(`Removed tickers: ${removedTickers.length ? removedTickers.join(', ') : 'none'}`);
+
+      // If tickers were added, trigger backfill/detection Lambda asynchronously
+      if (addedTickers.length > 0) {
+        try {
+          console.log(`Triggering backfill Lambda for ${addedTickers.length} added tickers`);
+
+          await lambdaClient.send(new InvokeCommand({
+            FunctionName: 'event-detector-backfill',
+            InvocationType: 'Event', // Async invocation (fire and forget)
+            Payload: JSON.stringify({
+              userId: userId,
+              addedTickers: addedTickers,
+              removedTickers: removedTickers
+            })
+          }));
+
+          console.log(`Backfill Lambda invoked successfully`);
+        } catch (backfillError) {
+          console.error('Failed to trigger backfill Lambda:', backfillError);
+          // Don't fail the watchlist update if backfill fails
+          // User's watchlist is still updated correctly
+        }
+      }
+
       res.json({
         success: true,
         watchlist: {
           user_id: userId,
           tickers: tickers,
+          webhook_url: webhook_url || null,
           updated_at: now,
           created_at: createdAt
         }
@@ -502,6 +575,101 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: "Failed to update watchlist"
+      });
+    }
+  });
+
+  // POST /api/watchlist/test-webhook - Test a Slack webhook
+  app.post("/api/watchlist/test-webhook", requireAuth, async (req, res) => {
+    try {
+      const { webhook_url } = req.body;
+
+      if (!webhook_url || typeof webhook_url !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: "Webhook URL is required"
+        });
+      }
+
+      // Validate URL format
+      try {
+        new URL(webhook_url);
+        if (!webhook_url.startsWith('https://hooks.slack.com/')) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid Slack webhook URL format. Must start with https://hooks.slack.com/"
+          });
+        }
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid webhook URL format"
+        });
+      }
+
+      // Send test message using axios (dynamically imported)
+      const axios = (await import('axios')).default;
+
+      const testMessage = {
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: '✅ Webhook Test Successful',
+              emoji: true
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Your Portfolio Intelligence Agent webhook is configured correctly! You will receive notifications here when new events are detected.'
+            }
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: `Test sent at <!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} {time}|${new Date().toISOString()}>`
+              }
+            ]
+          }
+        ]
+      };
+
+      await axios.post(webhook_url, testMessage, {
+        timeout: 5000,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      res.json({
+        success: true,
+        message: "Test message sent successfully"
+      });
+    } catch (error: any) {
+      console.error("Error testing webhook:", error);
+
+      if (error.code === 'ECONNABORTED') {
+        return res.status(408).json({
+          success: false,
+          error: "Webhook request timed out"
+        });
+      }
+
+      if (error.response) {
+        return res.status(400).json({
+          success: false,
+          error: `Slack returned error: ${error.response.status} - ${error.response.statusText}`
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: "Failed to send test message to webhook"
       });
     }
   });

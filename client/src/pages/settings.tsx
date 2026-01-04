@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchWatchlist, updateWatchlist, WatchlistTicker } from "@/lib/api";
+import { fetchWatchlist, updateWatchlist, testWebhook, WatchlistTicker } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Settings() {
@@ -20,6 +20,8 @@ export default function Settings() {
   const [newTickerSymbol, setNewTickerSymbol] = useState("");
   const [newTickerName, setNewTickerName] = useState("");
   const [isAddTickerOpen, setIsAddTickerOpen] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
 
   // Fetch watchlist from DynamoDB
   const { data: watchlist, isLoading, refetch } = useQuery({
@@ -28,6 +30,13 @@ export default function Settings() {
   });
 
   const tickers = watchlist?.tickers || [];
+
+  // Initialize webhook URL from fetched watchlist
+  useEffect(() => {
+    if (watchlist?.webhook_url) {
+      setWebhookUrl(watchlist.webhook_url);
+    }
+  }, [watchlist]);
 
   // Mutation for updating watchlist
   const updateMutation = useMutation({
@@ -102,6 +111,52 @@ export default function Settings() {
       return t;
     });
     updateMutation.mutate(newTickers);
+  };
+
+  const handleTestWebhook = async () => {
+    if (!webhookUrl) {
+      toast({
+        title: "Error",
+        description: "Please enter a webhook URL first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsTestingWebhook(true);
+    try {
+      await testWebhook(webhookUrl);
+      toast({
+        title: "Test Successful",
+        description: "Test message sent to Slack successfully!",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Test Failed",
+        description: error.message || "Failed to send test message",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  const handleSaveWebhook = async () => {
+    try {
+      const updatedTickers = watchlist?.tickers || [];
+      await updateWatchlist(updatedTickers, webhookUrl || null);
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] });
+      toast({
+        title: "Webhook Saved",
+        description: "Your Slack webhook URL has been updated.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save webhook URL. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
@@ -260,30 +315,54 @@ export default function Settings() {
                 <Bell className="h-5 w-5" />
                 Notifications
               </CardTitle>
+              <CardDescription>
+                Configure your personal Slack webhook to receive real-time alerts
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <div className="font-medium">Slack Webhook</div>
-                  <div className="text-sm text-muted-foreground">Send real-time alerts to #portfolio-intel channel</div>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="webhook-url">Slack Webhook URL</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="webhook-url"
+                    type="url"
+                    placeholder="https://hooks.slack.com/services/..."
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={handleTestWebhook}
+                    disabled={isTestingWebhook || !webhookUrl}
+                  >
+                    {isTestingWebhook ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      "Test"
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleSaveWebhook}
+                    disabled={!webhookUrl && !watchlist?.webhook_url}
+                  >
+                    Save
+                  </Button>
                 </div>
-                <Switch checked={true} />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <div className="font-medium">Email Digest</div>
-                  <div className="text-sm text-muted-foreground">Daily summary of high-impact events</div>
-                </div>
-                <Switch checked={false} />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <div className="font-medium">Confidence Threshold</div>
-                  <div className="text-sm text-muted-foreground">Only alert for High confidence analysis</div>
-                </div>
-                <Switch checked={true} />
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to use system default webhook.{" "}
+                  <a
+                    href="https://api.slack.com/messaging/webhooks"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    Learn how to create a webhook
+                  </a>
+                </p>
               </div>
             </CardContent>
           </Card>

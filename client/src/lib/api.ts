@@ -70,6 +70,7 @@ export interface WatchlistTicker {
 export interface Watchlist {
   user_id: string;
   tickers: WatchlistTicker[];
+  webhook_url?: string;
   updated_at: string | null;
   created_at: string | null;
 }
@@ -87,14 +88,14 @@ export async function fetchWatchlist(): Promise<Watchlist> {
   return data.watchlist;
 }
 
-export async function updateWatchlist(tickers: WatchlistTicker[]): Promise<Watchlist> {
+export async function updateWatchlist(tickers: WatchlistTicker[], webhookUrl?: string | null): Promise<Watchlist> {
   const response = await fetch(`${API_BASE}/watchlist`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
     credentials: 'include', // Send cookies with request
-    body: JSON.stringify({ tickers }),
+    body: JSON.stringify({ tickers, webhook_url: webhookUrl }),
   });
 
   if (!response.ok) {
@@ -103,6 +104,24 @@ export async function updateWatchlist(tickers: WatchlistTicker[]): Promise<Watch
 
   const data = await response.json();
   return data.watchlist;
+}
+
+export async function testWebhook(webhookUrl: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  const response = await fetch(`${API_BASE}/watchlist/test-webhook`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: 'include', // Send cookies with request
+    body: JSON.stringify({ webhook_url: webhookUrl }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Failed to test webhook");
+  }
+
+  return response.json();
 }
 
 export interface CurrentUser {
